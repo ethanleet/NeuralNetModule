@@ -59,18 +59,24 @@ class SoftmaxLayer:
 		return self.output
 	
 	def backward(self, gradient):
-		return gradient * self.output * (1 - self.output)
+		tempsum = np.sum(gradient * self.output, axis=1)
+		tempsum = np.reshape(tempsum, (gradient.shape[0], 1))
+		tempsum = np.repeat(tempsum, gradient.shape[1], axis=1)
+		return self.output * (gradient - tempsum)
 
-class CrossEntropyLossFunction:
+class BinaryCrossEntropyLossFunction:
 	def loss(self, output, teacher):
-		#print(teacher.shape, output.shape)
-		temp = - np.sum(teacher * np.log(output + 1e-100), axis=1)
-		#print(temp.shape)
-		return temp
-		#return -teacher * np.log(output + 1e-100) - (1 - teacher) * np.log(1 - output + 1e-100)
+		return -teacher * np.log(output + 1e-100) - (1 - teacher) * np.log(1 - output + 1e-100)
 		
 	def gradient(self, output, teacher):
 		return (1 - teacher) / (1 - output + 1e-100) - teacher / (output + 1e-100)
+
+class MultiwayCrossEntropyLossFunction:
+	def loss(self, output, teacher):
+		return - np.sum(teacher * np.log(output + 1e-100), axis=1)
+		
+	def gradient(self, output, teacher):
+		return - teacher / (output + 1e-100)
 
 class BinaryPredictor:
 	def predict(self, output):
@@ -96,14 +102,14 @@ class NaiveTrainer:
 			layer.weight -= regularizer.regularize(layer) * self.stepSize
 
 class AnnealingTrainer:
-	def __init__(self, stepSize = 0.05, T = 10):
+	def __init__(self, stepSize = 0.05, T = 0.1):
 		self.nstep = 0
 		self.stepSize = stepSize
 		self.T = T
 	
 	def train(self, layer, regularizer):
 		if hasattr(layer, 'weight'):
-			layer.weight -= regularizer.regularize(layer) * (self.stepSize / (1 + self.nstep / self.T))
+			layer.weight -= regularizer.regularize(layer) * (self.stepSize / (1 + np.power(self.nstep, 0.5) / self.T))
 
 class MomentumTrainer:
 	def __init__(self, stepSize = 0.05, momentumFactor = 0.9):
@@ -137,7 +143,7 @@ class L1Regularizer:
 		return layer.weightGradient + self.modifier * np.sign(layer.weight)
 		
 class NN:	
-	def __init__(self, lossfunction = CrossEntropyLossFunction(), trainer = NaiveTrainer(), regularizer = NoRegularizer(), predictor = ContinuousPredictor()):
+	def __init__(self, lossfunction, trainer = NaiveTrainer(), regularizer = NoRegularizer(), predictor = ContinuousPredictor()):
 		self.flow = []
 		self.lossfunction = lossfunction
 		self.trainer = trainer
@@ -159,15 +165,13 @@ class NN:
 		return input
 	
 	def loss(self, input, teacher):
-		#return np.sum(self.lossfunction.loss(self.test(input), teacher)) / input.shape[0]
 		return np.mean(self.lossfunction.loss(self.test(input), teacher))
 	
 	def predict(self, input):
 		return self.predictor.predict(self.test(input))
 	
-	# Q: this is wrong for softmax. depends on output layer type?
 	def predictionAccuracy(self, input, teacher):
-		return 1 - np.sum(np.abs(teacher - self.predict(input))) / input.shape[0]
+		return np.sum(np.sum(np.abs(teacher != self.predict(input)), axis=1) == 0) / input.shape[0]
 	
 	def train(self, input, teacher):
 		output = self.test(input)
@@ -238,7 +242,7 @@ def readData(label_fl, image_file, training):
 	label_file =  open(label_fl, 'rb')
 	tup = struct.unpack(">II", label_file.read(8))
 	labels = np.fromfile(label_file, dtype=np.int8)
-
+	
 	img_file = open(image_file, 'rb')
 	tup = struct.unpack(">IIII", img_file.read(16))
 	images = np.fromfile(img_file, dtype=np.uint8).reshape(len(labels), tup[2], tup[3])
@@ -278,12 +282,14 @@ def preprocessData(mode="2v3", holdoutFixed=False):
 		input = images[np.where(np.isin(labels, [2, second_label]))]
 		teacher = labels[np.where(np.isin(labels, [2, second_label]))]
 		teacher = np.reshape(teacher, (teacher.shape[0], 1))
-		teacher = 3 - teacher if second_label == 3 else (8 - teacher) / 6
+		#teacher = 3 - teacher if second_label == 3 else (8 - teacher) / 6
+		teacher = (teacher == 2).astype(int)
 
 		test_input = test_images[np.where(np.isin(test_labels, [2, second_label]))]
 		test_teacher = test_labels[np.where(np.isin(test_labels, [2, second_label]))]
 		test_teacher = np.reshape(test_teacher, (test_teacher.shape[0], 1))
-		test_teacher = 3 - test_teacher if second_label == 3 else (8 - teacher) / 6
+		#test_teacher = 3 - test_teacher if second_label == 3 else (8 - teacher) / 6
+		test_teacher = (test_teacher == 2).astype(int)
 		
 	n1 = int(np.round(input.shape[0]*0.9))
 	if holdoutFixed:
@@ -319,6 +325,7 @@ Return Values:
 11 float minHoldoutLoss
 12 float minTestLoss
 13 float minWeightLength
+14 array minWeights
 """
 def doTrain(nn, inputData, earlyStopThreshold=1e9, maxEpochLimit=1e9):
 	train_input, train_teacher, holdout_input, holdout_teacher, test_input, test_teacher = inputData
@@ -335,8 +342,10 @@ def doTrain(nn, inputData, earlyStopThreshold=1e9, maxEpochLimit=1e9):
 	r = 0
 	lastLoss = 1e9
 	minLoss = 1e9
-
-	while cnt < earlyStopThreshold and r < maxEpochLimit:
+	
+	earlyStopTolerate = earlyStopThreshold * 3 if earlyStopThreshold != 1e9 else 0
+	
+	while r < earlyStopTolerate or cnt < earlyStopThreshold and r < maxEpochLimit:
 		r += 1
 		nn.train(train_input, train_teacher)
 		loss = nn.loss(holdout_input, holdout_teacher)
@@ -350,14 +359,9 @@ def doTrain(nn, inputData, earlyStopThreshold=1e9, maxEpochLimit=1e9):
 		
 		if r % 10 == 0:
 			print ("=======epoch ",r , ", current loss is", loss,"=======")
-			if problem_type == "sigmoid":
-				print ("train   wrong/total", np.sum(np.abs(train_teacher - nn.test(train_input)) > 0.5), train_teacher.shape[0])
-				print ("holdout wrong/total", np.sum(np.abs(holdout_teacher - nn.test(holdout_input)) > 0.5), holdout_teacher.shape[0])
-				print ("test    wrong/total", np.sum(np.abs(test_teacher - nn.test(test_input)) > 0.5), test_teacher.shape[0])
-			else:
-				print ("train   accuracy", trainPercentCorrectArray[-1])
-				print ("holdout accuracy", holdoutPercentCorrectArray[-1])
-				print ("test    accuracy", testPercentCorrectArray[-1])
+			print ("train   accuracy", trainPercentCorrectArray[-1])
+			print ("holdout accuracy", holdoutPercentCorrectArray[-1])
+			print ("test    accuracy", testPercentCorrectArray[-1])
 
 		if (loss >= lastLoss - 1e-10):
 			cnt += 1
@@ -372,23 +376,17 @@ def doTrain(nn, inputData, earlyStopThreshold=1e9, maxEpochLimit=1e9):
 			minTrainLoss = trainLossArray[-1]
 			minHoldoutLoss = holdoutLossArray[-1]
 			minTestLoss = testLossArray[-1]
+			minWeightLength = np.linalg.norm(minWeights)
 		
 		lastLoss = loss
-		minWeightLength = np.linalg.norm(minWeights)
-		
 		
 	nn.setWeights(minWeights)
 	print ("=======", r, "epochs in total, minimum loss is", minLoss ,"=======")
-	if problem_type == "sigmoid":
-		print ("train   wrong/total", np.sum(np.abs(train_teacher - nn.test(train_input)) > 0.5), train_teacher.shape[0])
-		print ("holdout wrong/total", np.sum(np.abs(holdout_teacher - nn.test(holdout_input)) > 0.5), holdout_teacher.shape[0])
-		print ("test    wrong/total", np.sum(np.abs(test_teacher - nn.test(test_input)) > 0.5), test_teacher.shape[0])
-	else:
-		print ("train   accuracy", trainPercentCorrectArray[-1])
-		print ("holdout accuracy", holdoutPercentCorrectArray[-1])
-		print ("test    accuracy", testPercentCorrectArray[-1])
+	print ("train   accuracy", minTrainAccuracy)
+	print ("holdout accuracy", minHoldoutAccuracy)
+	print ("test    accuracy", minTestAccuracy)
 	
-	return [r, trainLossArray, holdoutLossArray, testLossArray, trainPercentCorrectArray, holdoutPercentCorrectArray, testPercentCorrectArray, minTrainAccuracy, minHoldoutAccuracy, minTestAccuracy, minTrainLoss, minHoldoutLoss, minTestLoss, minWeightLength]
+	return [r, trainLossArray, holdoutLossArray, testLossArray, trainPercentCorrectArray, holdoutPercentCorrectArray, testPercentCorrectArray, minTrainAccuracy, minHoldoutAccuracy, minTestAccuracy, minTrainLoss, minHoldoutLoss, minTestLoss, minWeightLength, minWeights]
 
 def plotAccuracyVsInitialRates(accuracyAcrossIR, initialRates):
 	plot_title = "Q4. Percent accuracy vs. different initial learning rates"
@@ -400,7 +398,7 @@ def plotAccuracyVsInitialRates(accuracyAcrossIR, initialRates):
 	plt.title(plot_title)
 	plt.xlabel("initial learning rates")
 	plt.ylabel("accuracy")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 
@@ -413,38 +411,50 @@ def plotLossVsInitialRates(lossAcrossIR, initialRates):
 	plt.plot(initialRates, lossAcrossIR[2], label="test")
 	plt.title(plot_title)
 	plt.xlabel("initial learning rates")
-	plt.ylabel("accuracy")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.ylabel("loss")
+	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 
-def plotAccuracy(trainingStats, mode):
+def plotAccuracy(trainingStats, mode="2v3"):
 	epochs, trainLossArray, holdoutLossArray, testLossArray, trainPercentCorrectArray, holdoutPercentCorrectArray, testPercentCorrectArray = trainingStats
-	second_label = "3" if mode == "2v3" else "8"
-	plot_title = "Q4. 2 vs " + second_label + " Sigmoid Percent Accuracy"
-	file_name = "Q4Accuracy2" + second_label + timestamp + ".png"
+	if mode == "2v3":
+		plot_title = "Q4. 2 vs 3 Sigmoid  Percent Accuracy"
+		file_name = "Q4Accuracy23" + timestamp + ".png"
+	elif mode == "2v8":
+		plot_title = "Q4. 2 vs 8 Sigmoid  Percent Accuracy"
+		file_name = "Q4Accuracy28" + timestamp + ".png"
+	else:
+		plot_title = "Q6. Softmax Percent Accuracy"
+		file_name = "Q6Accuracy" + timestamp + ".png"
 	plt.plot(range(epochs), trainPercentCorrectArray, label="train")
 	plt.plot(range(epochs), holdoutPercentCorrectArray, label="holdout")
 	plt.plot(range(epochs), testPercentCorrectArray, label="test")
 	plt.title(plot_title)
 	plt.xlabel("epochs")
 	plt.ylabel("accuracy")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 
-def plotLoss(trainingStats, mode):
+def plotLoss(trainingStats, mode="2v3"):
 	epochs, trainLossArray, holdoutLossArray, testLossArray, trainPercentCorrectArray, holdoutPercentCorrectArray, testPercentCorrectArray = trainingStats
-	second_label = "3" if mode == "2v3" else "8"
-	plot_title = "Q4. 2 vs " + second_label + " Sigmoid  Cross Entropy Loss"
-	file_name = "Q4Loss2" + second_label + timestamp + ".png"
+	if mode == "2v3":
+		plot_title = "Q4. 2 vs 3 Sigmoid  Cross Entropy Loss"
+		file_name = "Q4Loss23" + timestamp + ".png"
+	elif mode == "2v8":
+		plot_title = "Q4. 2 vs 8 Sigmoid  Cross Entropy Loss"
+		file_name = "Q4Loss28" + timestamp + ".png"
+	else:
+		plot_title = "Q6. Softmax Cross Entropy Loss"
+		file_name = "Q6Loss" + timestamp + ".png"
 	plt.plot(range(epochs), trainLossArray, label="train")
 	plt.plot(range(epochs), holdoutLossArray, label="holdout")
 	plt.plot(range(epochs), testLossArray, label="test")
 	plt.title(plot_title)
 	plt.xlabel("epochs")
 	plt.ylabel("loss")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 
@@ -452,22 +462,45 @@ def plotAccuracyVsLambda(accuracyAcrossLambda, log_lambda, regularization_mode):
 	plot_title = "Q5. Percent accuracy vs. different λ with " + regularization_mode + " regularization"
 	file_name = "Q5AccuracyOverLambda" + regularization_mode + timestamp + ".png"
 	accuracyAcrossLambda = list(np.asarray(accuracyAcrossLambda).T)
-	plt.plot(log_lambda, accuracyAcrossLambda[2], label="test")
+	plt.plot(log_lambda, accuracyAcrossLambda[0], label="train")
 	plt.title(plot_title)
 	plt.xlabel("log(λ)")
 	plt.ylabel("accuracy")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.legend()
+	plt.savefig(file_name)
+	plt.clf()
+
+def plotLossVsLambda(lossAcrossLambda, log_lambda, regularization_mode):
+	plot_title = "Q5. Test error vs. different λ with " + regularization_mode + " regularization"
+	file_name = "Q5LossOverLambda" + regularization_mode + timestamp + ".png"
+	lossAcrossLambda = list(np.asarray(lossAcrossLambda).T)
+	plt.plot(log_lambda, lossAcrossLambda[2], label="test")
+	plt.title(plot_title)
+	plt.xlabel("log(λ)")
+	plt.ylabel("test error")
+	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 	
 def plotWeightLengthsVsLambda(weightLengths, log_lambda, regularization_mode):
 	plot_title = "Q5. Weight lengths vs. different λ with " + regularization_mode + " regularization"
 	file_name = "Q5WeightLengthsOverLambda" + regularization_mode + timestamp + ".png"
-	plt.plot(log_lambda, weightLengths, label="test")
+	plt.plot(log_lambda, weightLengths)
 	plt.title(plot_title)
 	plt.xlabel("log(λ)")
 	plt.ylabel("weight lengths")
-	plt.legend(bbox_to_anchor=(1.05, 1.), loc=1, borderaxespad=0)
+	plt.savefig(file_name)
+	plt.clf()
+
+def displayWeights(weights, file_name):
+	file_name = file_name + timestamp + ".png"
+	plt.imshow(weights)
+	plt.savefig(file_name)
+	plt.clf()
+
+def displayWeightsWithDigits(weights, training_input, file_name):
+	file_name = file_name + timestamp + ".png"
+	plt.imshow(np.hstack((weights, training_input)))
 	plt.savefig(file_name)
 	plt.clf()
 
@@ -508,13 +541,13 @@ def plotWeightLengthsVsLambda(weightLengths, log_lambda, regularization_mode):
 """
 Used to try different initial learning rates
 """
-def Q4_trial(classes="2v3", holdoutFixed=True):
+def Q4_trial(classes="2v3", holdoutFixed=False):
 	(inputData, bits) = preprocessData(classes, holdoutFixed)
-	initialRates = np.linspace(1e-5, 2e-5, num=10)
+	initialRates = np.linspace(3e-5, 5e-4, num=30)
 	accuracyAcrossIR, lossAcrossIR = [],[]
 	for initialRate in initialRates:
-		nn = NN(trainer=AnnealingTrainer(initialRate), predictor=BinaryPredictor())
-		nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=1, weightInitialFactor=0.0001), SigmoidLayer()])
+		nn = NN(lossfunction=BinaryCrossEntropyLossFunction(), trainer=AnnealingTrainer(initialRate), predictor=BinaryPredictor())
+		nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=1, weightInitialFactor=0.000), SigmoidLayer()])
 		trainingStats = doTrain(nn, inputData, earlyStopThreshold=3)
 		accuracyAcrossIR.append(trainingStats[7:10])
 		lossAcrossIR.append(trainingStats[10:13])
@@ -526,63 +559,62 @@ Used to train logistic regression on 2v3 and 2v8 problems
 """
 def Q4(classes="2v3", holdoutFixed=False):
 	(inputData, bits) = preprocessData(classes, holdoutFixed)
-	nn = NN(trainer=AnnealingTrainer(1.6e-5, T=0.3), predictor=BinaryPredictor())
+	nn = NN(lossfunction=BinaryCrossEntropyLossFunction(), trainer=AnnealingTrainer(0.00021), predictor=BinaryPredictor())
 	nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=1, weightInitialFactor=0.0001), SigmoidLayer()])
 	trainingStats = doTrain(nn, inputData, earlyStopThreshold=3)
-	plotAccuracy(trainingStats[:7], classes)
-	plotLoss(trainingStats[:7], classes)
+	plotAccuracy(trainingStats[:7], mode=classes)
+	plotLoss(trainingStats[:7], mode=classes)
+	return trainingStats[14]
 
 """
-Used to find a good holdout set
+Used to compare final weights of the 2v3 and 2v8 problems
 """
-def Q4crazy(limit, mode="2v3"):
-	(inputData, bits) = preprocessData(mode, holdoutFixed=False)
-	nn = NN(trainer=AnnealingTrainer(1.12e-5), predictor=BinaryPredictor())
-	nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=1, weightInitialFactor=0.0001), SigmoidLayer()])
-	trainingStats = doTrain(nn, inputData, earlyStopThreshold=3, maxEpochLimit=limit+10)
-	plotAccuracy(trainingStats[:7], mode)
-	plotLoss(trainingStats[:7], mode)
-	if trainingStats[0] < limit:
-		np.savetxt('test_holdout_set.txt', bits, fmt='%d')
-		return False
-	return True
+def Q4_weights():
+	weights23 = Q4(classes="2v3", holdoutFixed=False)
+	weights28 = Q4(classes="2v8", holdoutFixed=False)
+	displayWeights(weights23[0][:-1].reshape(28,28), "Q4FinalWeights23")
+	displayWeights(weights28[0][:-1].reshape(28,28), "Q4FinalWeights28")
+	displayWeights((weights23[0][:-1] - weights28[0][:-1]).reshape(28,28), "Q4FinalWeightsDifference")
 
 """
 Used to train logistic regression with regularization
 """
 def Q5(classes="2v3", regularization="L1", holdoutFixed=False):
 	(inputData, bits) = preprocessData("2v3", holdoutFixed)
-	accuracyAcrossLambda, weightLengths = [],[]
-	log_lambda = range(-3,5)
+	accuracyAcrossLambda, lossAcrossLambda, weightLengths, finalWeights = [],[],[],[]
+	log_lambda = range(-5,3)
 	for i in log_lambda:
 		lambda_value = 10**i
-		nn = NN(trainer=AnnealingTrainer(1.8e-5), predictor=BinaryPredictor(), regularizer=L1Regularizer(lambda_value) if regularization == "L1" else L2Regularizer(lambda_value))
+		nn = NN(lossfunction=BinaryCrossEntropyLossFunction(), trainer=AnnealingTrainer(0.00021), predictor=BinaryPredictor(), regularizer=L1Regularizer(lambda_value) if regularization == "L1" else L2Regularizer(lambda_value))
 		nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=1, weightInitialFactor=0.0001), SigmoidLayer()])
 		trainingStats = doTrain(nn, inputData, earlyStopThreshold=3)
 		accuracyAcrossLambda.append(trainingStats[7:10])
+		lossAcrossLambda.append(trainingStats[10:13])
 		weightLengths.append(trainingStats[13])
+		finalWeights.append(trainingStats[14])
 	plotAccuracyVsLambda(accuracyAcrossLambda, log_lambda, regularization)
+	plotLossVsLambda(lossAcrossLambda, log_lambda, regularization)
 	plotWeightLengthsVsLambda(weightLengths, log_lambda, regularization)
+	for i, weights in enumerate(finalWeights):
+		displayWeights(weights[0][:-1].reshape(28,28), "Q5FinalWeightsLambda" + str(i) + regularization)
 
 """
 Used to train softmax regression
 """
 def Q6():
-	(inputData, bits) = preprocessData("all")
-	nn = NN(trainer=AnnealingTrainer(5e-6), predictor=MaxPredictor(), regularizer=L2Regularizer(0.1))
+	(inputData, bits) = preprocessData("all", holdoutFixed=False)
+	nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=AnnealingTrainer(0.0000114, T=0.2), predictor=MaxPredictor(), regularizer=L2Regularizer(0.001))
 	nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=10, weightInitialFactor=0.0001), SoftmaxLayer()])
-	trainingStats = doTrain(nn, inputData, earlyStopThreshold=3)
-	
-#while Q4crazy(300, "2v3"):
-#	print("NOO PLZZZZZ")
-#print("FUCK YES")
-
-
-
-
-#Q4_trial(holdoutFixed=True)
-#Q4(classes="2v3", holdoutFixed=True)
-#Q4(classes="2v8", holdoutFixed=True)
-#Q5(regularization="L1", holdoutFixed=True)
-#Q5(regularization="L2", holdoutFixed=True)
+	trainingStats = doTrain(nn, inputData, earlyStopThreshold=7, maxEpochLimit=2000)
+	plotAccuracy(trainingStats[:7], mode="all")
+	plotLoss(trainingStats[:7], mode="all")
+	finalWeights = trainingStats[14][0]
+	for digit in range(finalWeights.shape[1]):
+		averageImage = np.mean(inputData[0][np.where(np.isin(np.argmax(inputData[1], axis=1), [digit]))], axis=0)
+		displayWeightsWithDigits(finalWeights[:-1,digit].reshape(28,28), averageImage.reshape(28,28), "Q6WeightsDigit" + str(digit))
+		
+Q4_trial()
+Q4_weights()
+Q5(regularization="L1")
+Q5(regularization="L2")
 Q6()
