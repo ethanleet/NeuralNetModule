@@ -14,7 +14,7 @@ class FullyConnectedLayer:
 	def __init__(self, inputSize, outputSize, weightInitialFactor = 1):
 		self.inputSize = inputSize
 		self.outputSize = outputSize
-		self.weight = (np.random.rand(inputSize + 1, outputSize) * 2 - 1) * weightInitialFactor
+		self.weight = np.random.normal(loc=0, scale=weightInitialFactor / np.sqrt(inputSize + 1), size=(inputSize + 1, outputSize))
 		self.weightGradient = np.zeros((inputSize + 1, outputSize))
 	
 	def forward(self, input):
@@ -73,6 +73,7 @@ class BinaryCrossEntropyLossFunction:
 
 class MultiwayCrossEntropyLossFunction:
 	def loss(self, output, teacher):
+		temp = teacher * np.log(output + 1e-100)
 		return - np.sum(teacher * np.log(output + 1e-100), axis=1)
 		
 	def gradient(self, output, teacher):
@@ -94,34 +95,20 @@ class MaxPredictor:
 		return prediction
 
 class NaiveTrainer:
-	def __init__(self, stepSize = 0.05):
-		self.stepSize = stepSize
-	
-	def train(self, layer, regularizer):
+	def train(self, layer, regularizer, stepSize):
 		if hasattr(layer, 'weight'):
-			layer.weight -= regularizer.regularize(layer) * self.stepSize
-
-class AnnealingTrainer:
-	def __init__(self, stepSize = 0.05, T = 0.1):
-		self.nstep = 0
-		self.stepSize = stepSize
-		self.T = T
-	
-	def train(self, layer, regularizer):
-		if hasattr(layer, 'weight'):
-			layer.weight -= regularizer.regularize(layer) * (self.stepSize / (1 + np.power(self.nstep, 0.5) / self.T))
+			layer.weight -= regularizer.regularize(layer) * stepSize
 
 class MomentumTrainer:
-	def __init__(self, stepSize = 0.05, momentumFactor = 0.9):
-		self.stepSize = stepSize
+	def __init__(self, momentumFactor = 0.9):
 		self.momentumFactor = momentumFactor
 	
-	def train(self, layer, regularizer):
+	def train(self, layer, regularizer, stepSize):
 		if hasattr(layer, 'weight'):
 			if hasattr(layer, 'momentum'):
-				layer.momentum = layer.momentum * self.momentumFactor + regularizer.regularize(layer) * self.stepSize * (1 - self.momentumFactor)
+				layer.momentum = layer.momentum * self.momentumFactor + regularizer.regularize(layer) * stepSize * (1 - self.momentumFactor)
 			else:
-				layer.momentum = regularizer.regularize(layer) * self.stepSize * (1 - self.momentumFactor)
+				layer.momentum = regularizer.regularize(layer) * stepSize * (1 - self.momentumFactor)
 			layer.weight -= layer.momentum
 
 class NoRegularizer:
@@ -149,14 +136,17 @@ class NN:
 		self.trainer = trainer
 		self.predictor = predictor
 		self.regularizer = regularizer
+		self.numWeights = 0
 	
 	def addLinearLayers(self, layerList):
 		for i in range(len(layerList)):
 			if i == len(layerList) - 1:
-				self.flow.append((layerList[i], []));
+				self.flow.append((layerList[i], []))
 			else:
-				self.flow.append((layerList[i], [layerList[i + 1]]));
-	
+				self.flow.append((layerList[i], [layerList[i + 1]]))
+			if hasattr(layerList[i], 'weight'):
+				self.numWeights += layerList[i].weight.size
+		
 	def test(self, input):
 		for step in self.flow:
 			layer = step[0]
@@ -173,14 +163,14 @@ class NN:
 	def predictionAccuracy(self, input, teacher):
 		return np.sum(np.sum(np.abs(teacher != self.predict(input)), axis=1) == 0) / input.shape[0]
 	
-	def train(self, input, teacher):
+	def train(self, input, teacher, stepSize):
 		output = self.test(input)
 		gradient = self.lossfunction.gradient(output, teacher)
 		for step in reversed(self.flow):
 			layer = step[0]
 			#Assume to be linear
 			gradient = layer.backward(gradient)
-			self.trainer.train(layer, self.regularizer)
+			self.trainer.train(layer, self.regularizer, stepSize / np.sqrt(self.numWeights))
 	
 	def getWeights(self):
 		weights = []
@@ -195,42 +185,64 @@ class NN:
 		for step in self.flow:
 			layer = step[0]
 			if hasattr(layer, 'weight'):
-				layer.weight = weights[i]
+				layer.weight = np.copy(weights[i])
 				i += 1
 
-#											 ::
-#											:;J7, :,                        ::;7:
-#											,ivYi, ,                       ;LLLFS:
-#											:iv7Yi                       :7ri;j5PL
-#										 ,:ivYLvr                    ,ivrrirrY2X,
-#										 :;r@Wwz.7r:                :ivu@kexianli.
-#										:iL7::,:::iiirii:ii;::::,,irvF7rvvLujL7ur
-#									 ri::,:,::i:iiiiiii:i:irrv177JX7rYXqZEkvv17
-#								;i:, , ::::iirrririi:i:::iiir2XXvii;L8OGJr71i
-#							:,, ,,:   ,::ir@mingyi.irii:i:::j1jri7ZBOS7ivv,
-#								 ,::,    ::rv77iiiriii:iii:i::,rvLq@huhao.Li
-#						 ,,      ,, ,:ir7ir::,:::i;ir:::i:i::rSGGYri712:
-#					 :::  ,v7r:: ::rrv77:, ,, ,:i7rrii:::::, ir7ri7Lri
-#					,     2OBBOi,iiir;r::        ,irriiii::,, ,iv7Luur:
-#				,,     i78MBBi,:,:::,:,  :7FSL: ,iriii:::i::,,:rLqXv::
-#				:      iuMMP: :,:::,:ii;2GY7OBB0viiii:i:iii:i:::iJqL;::
-#			 ,     ::::i   ,,,,, ::LuBBu BBBBBErii:i:i:i:i:i:i:r77ii
-#			,       :       , ,,:::rruBZ1MBBqi, :,,,:::,::::::iiriri:
-#		 ,               ,,,,::::i:  @arqiao.       ,:,, ,:::ii;i7:
-#		:,       rjujLYLi   ,,:::::,:::::::::,,   ,:i,:,,,,,::i:iii
-#		::      BBBBBBBBB0,    ,,::: , ,:::::: ,      ,,,, ,,:::::::
-#		i,  ,  ,8BMMBBBBBBi     ,,:,,     ,,, , ,   , , , :,::ii::i::
-#		:      iZMOMOMBBM2::::::::::,,,,     ,,,,,,:,,,::::i:irr:i:::,
-#		i   ,,:;u0MBMOG1L:::i::::::  ,,,::,   ,,, ::::::i:i:iirii:i:i:
-#		:    ,iuUuuXUkFu7i:iii:i:::, :,:,: ::::::::i:i:::::iirr7iiri::
-#		:     :rk@Yizero.i:::::, ,:ii:::::::i:::::i::,::::iirrriiiri::,
-#		 :      5BMBBBBBBSr:,::rv2kuii:::iii::,:i:,, , ,,:,:i@petermu.,
-#					, :r50EZ8MBBBBGOBBBZP7::::i::,:::::,: :,:,::i;rrririiii::
-#							:jujYY7LS0ujJL7r::,::i::,::::::::::::::iirirrrrrrr:ii:
-#					 ,:  :@kevensun.:,:,,,::::i:i:::::,,::::::iir;ii;7v77;ii;i,
-#					 ,,,     ,,:,::::::i:iiiii:i::::,, ::::iiiir@xingjief.r;7:i,
-#				, , ,,,:,,::::::::iiiiiiiiii:,:,:::::::::iiir;ri7vL77rrirri::
-#				 :,, , ::::::::i:::i:::i:i::,,,,,:,::i:i:::iir;@Secbone.ii:::
+class Data:
+	def __init__(self, training_input, training_teacher, holdout_input, holdout_teacher, test_input, test_teacher):
+		self.training_input = training_input
+		self.training_teacher = training_teacher
+		self.holdout_input = holdout_input
+		self.holdout_teacher = holdout_teacher
+		self.test_input = test_input
+		self.test_teacher = test_teacher
+
+class BatchTrainingMethod:
+	def train(self, nn, input, teacher, stepSize):
+		nn.train(input, teacher, stepSize)
+
+class MiniBatchTrainingMethod:
+	def __init__(self, batchSize=128):
+		self.batchSize = batchSize
+	
+	def train(self, nn, input, teacher, stepSize):
+		permutation = np.random.permutation(input.shape[0])
+		input = input[permutation]
+		teacher = teacher[permutation]
+		
+		for i in range(np.ceil(input.shape[0] / float(self.batchSize)).astype(int)):
+			batch_input = input[i * self.batchSize: (i+1) * self.batchSize]
+			batch_teacher = teacher[i * self.batchSize: (i+1) * self.batchSize]
+			nn.train(batch_input, batch_teacher, stepSize)
+
+class PowerAnnealingFunction:
+	def __init__(self, initialStepSize = 0.05, T = 0.1, power = 0.5):
+		self.nstep = 0
+		self.initialStepSize = initialStepSize
+		self.T = T
+		self.power = power
+	
+	def evaluate(self, stepNum):
+		return self.initialStepSize / (1 + np.power(self.nstep, self.power) / self.T)
+
+class NNTrainingWorkflow:
+	def __init__(self, nn, data, timeout = 1000, trainingMethod = BatchTrainingMethod(), annealingFunction = PowerAnnealingFunction(), callbackFunction = None):
+		self.nn = nn
+		self.data = data
+		self.timeout = timeout
+		self.trainingMethod = trainingMethod
+		self.annealingFunction = annealingFunction
+		self.callbackFunction = callbackFunction
+		self.earlyStop = False
+	
+	def train(self):
+		self.t = 0
+		while self.t < self.timeout and not self.earlyStop:
+			stepSize = self.annealingFunction.evaluate(self.t)
+			self.trainingMethod.train(self.nn, self.data.training_input, self.data.training_teacher, stepSize)
+			if self.callbackFunction is not None:
+				self.callbackFunction(self)
+			self.t += 1
 
 def readData(label_fl, image_file, training):
 	
@@ -250,11 +262,11 @@ def readData(label_fl, image_file, training):
 	subset = np.zeros((val,tup[2]*tup[3]),dtype=np.float64)
 	if training:
 		for img in range(20000):
-			subset[img] = images[img].flatten()/float(100)
+			subset[img] = images[img].flatten()/float(127.5) - 1.0
 		return (labels[:20000],subset)
 	else:
 		for img in range(2000):
-			subset[img] = images[len(images) - 2000 + img].flatten()/float(100)
+			subset[img] = images[len(images) - 2000 + img].flatten()/float(127.5) - 1.0
 		return (labels[len(images) - 2000:],subset)
 
 """
@@ -504,40 +516,6 @@ def displayWeightsWithDigits(weights, training_input, file_name):
 	plt.savefig(file_name)
 	plt.clf()
 
-#											 ::
-#											:;J7, :,                        ::;7:
-#											,ivYi, ,                       ;LLLFS:
-#											:iv7Yi                       :7ri;j5PL
-#										 ,:ivYLvr                    ,ivrrirrY2X,
-#										 :;r@Wwz.7r:                :ivu@kexianli.
-#										:iL7::,:::iiirii:ii;::::,,irvF7rvvLujL7ur
-#									 ri::,:,::i:iiiiiii:i:irrv177JX7rYXqZEkvv17
-#								;i:, , ::::iirrririi:i:::iiir2XXvii;L8OGJr71i
-#							:,, ,,:   ,::ir@mingyi.irii:i:::j1jri7ZBOS7ivv,
-#								 ,::,    ::rv77iiiriii:iii:i::,rvLq@huhao.Li
-#						 ,,      ,, ,:ir7ir::,:::i;ir:::i:i::rSGGYri712:
-#					 :::  ,v7r:: ::rrv77:, ,, ,:i7rrii:::::, ir7ri7Lri
-#					,     2OBBOi,iiir;r::        ,irriiii::,, ,iv7Luur:
-#				,,     i78MBBi,:,:::,:,  :7FSL: ,iriii:::i::,,:rLqXv::
-#				:      iuMMP: :,:::,:ii;2GY7OBB0viiii:i:iii:i:::iJqL;::
-#			 ,     ::::i   ,,,,, ::LuBBu BBBBBErii:i:i:i:i:i:i:r77ii
-#			,       :       , ,,:::rruBZ1MBBqi, :,,,:::,::::::iiriri:
-#		 ,               ,,,,::::i:  @arqiao.       ,:,, ,:::ii;i7:
-#		:,       rjujLYLi   ,,:::::,:::::::::,,   ,:i,:,,,,,::i:iii
-#		::      BBBBBBBBB0,    ,,::: , ,:::::: ,      ,,,, ,,:::::::
-#		i,  ,  ,8BMMBBBBBBi     ,,:,,     ,,, , ,   , , , :,::ii::i::
-#		:      iZMOMOMBBM2::::::::::,,,,     ,,,,,,:,,,::::i:irr:i:::,
-#		i   ,,:;u0MBMOG1L:::i::::::  ,,,::,   ,,, ::::::i:i:iirii:i:i:
-#		:    ,iuUuuXUkFu7i:iii:i:::, :,:,: ::::::::i:i:::::iirr7iiri::
-#		:     :rk@Yizero.i:::::, ,:ii:::::::i:::::i::,::::iirrriiiri::,
-#		 :      5BMBBBBBBSr:,::rv2kuii:::iii::,:i:,, , ,,:,:i@petermu.,
-#					, :r50EZ8MBBBBGOBBBZP7::::i::,:::::,: :,:,::i;rrririiii::
-#							:jujYY7LS0ujJL7r::,::i::,::::::::::::::iirirrrrrrr:ii:
-#					 ,:  :@kevensun.:,:,,,::::i:i:::::,,::::::iir;ii;7v77;ii;i,
-#					 ,,,     ,,:,::::::i:iiiii:i::::,, ::::iiiir@xingjief.r;7:i,
-#				, , ,,,:,,::::::::iiiiiiiiii:,:,:::::::::iiir;ri7vL77rrirri::
-#				 :,, , ::::::::i:::i:::i:i::,,,,,:,::i:i:::iir;@Secbone.ii::: 
-
 """
 Used to try different initial learning rates
 """
@@ -605,16 +583,58 @@ def Q6():
 	(inputData, bits) = preprocessData("all", holdoutFixed=False)
 	nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=AnnealingTrainer(0.0000114, T=0.2), predictor=MaxPredictor(), regularizer=L2Regularizer(0.001))
 	nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=10, weightInitialFactor=0.0001), SoftmaxLayer()])
-	trainingStats = doTrain(nn, inputData, earlyStopThreshold=7, maxEpochLimit=2000)
+	trainingStats = doTrain(nn, inputData, earlyStopThreshold=3, maxEpochLimit=2000)
 	plotAccuracy(trainingStats[:7], mode="all")
 	plotLoss(trainingStats[:7], mode="all")
 	finalWeights = trainingStats[14][0]
 	for digit in range(finalWeights.shape[1]):
 		averageImage = np.mean(inputData[0][np.where(np.isin(np.argmax(inputData[1], axis=1), [digit]))], axis=0)
 		displayWeightsWithDigits(finalWeights[:-1,digit].reshape(28,28), averageImage.reshape(28,28), "Q6WeightsDigit" + str(digit))
-		
-Q4_trial()
-Q4_weights()
-Q5(regularization="L1")
-Q5(regularization="L2")
-Q6()
+
+
+# Metaparameter
+nHiddenUnits = 64
+epsilon = 0.001
+
+# Read data
+(inputData, bits) = preprocessData("all", holdoutFixed=False)
+data = Data(inputData[0], inputData[1], inputData[2], inputData[3], inputData[4], inputData[5])
+
+
+# Check with numerical approximation
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+
+def numericApprox(nn, layerNum, rowNum, colNum, graphID):
+	oldWeight = nn.getWeights()
+	
+	weightPlus = np.copy(nn.getWeights())
+	weightMinus = np.copy(nn.getWeights())
+	weightPlus[layerNum][rowNum,colNum] += epsilon
+	nn.setWeights(weightPlus)
+	lossPlus = nn.loss(inputData[0][graphID:graphID+1], inputData[1][graphID:graphID+1])
+	
+	weightMinus[layerNum][rowNum,colNum] -= epsilon
+	nn.setWeights(weightMinus)
+	lossMinus = nn.loss(inputData[0][graphID:graphID+1], inputData[1][graphID:graphID+1])
+	
+	nn.setWeights(np.copy(oldWeight))
+	nn.train(inputData[0][graphID:graphID+1], inputData[1][graphID:graphID+1], 1)
+	newWeight = nn.getWeights()
+	
+	gradient = np.sqrt(nn.numWeights)*(oldWeight[layerNum][rowNum,colNum] - newWeight[layerNum][rowNum,colNum])
+	approx = (lossPlus - lossMinus) / (2 * epsilon)
+	print(gradient, approx, abs(gradient-approx)/(epsilon**2))
+	nn.setWeights(oldWeight)
+
+numericApprox(nn, 0, 0, 0, 0)
+numericApprox(nn, 1, 0, 0, 0)
+numericApprox(nn, 0, 784, 0, 0)
+numericApprox(nn, 1, 64, 0, 0)
+# Train
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(), callbackFunction=None)
+#workflow.train()
