@@ -43,6 +43,33 @@ class SigmoidLayer:
 	def backward(self, gradient):
 		return gradient * self.output * (1 - self.output)
 
+class TanhLayer:
+	def __init__(self, leakFactor = 0.001):
+		self.leakFactor = leakFactor
+	
+	def forward(self, input):
+		self.input = input
+		return 1.7159 * np.tanh(2/3. * input) + self.leakFactor * input
+	def backward(self, gradient):
+		return gradient * ((1.7159 * 2)/(3. * np.power(np.cosh(2/3. * self.input), 2)) + self.leakFactor)
+
+class ChaosLayer:
+	def __init__(self, inputSize, outputSize, weightInitialFactor = 1):
+		self.inputSize = inputSize
+		self.outputSize = outputSize
+		self.weight = np.concatenate((np.random.normal(loc=0, scale=weightInitialFactor / np.sqrt(inputSize + 1), size=(inputSize + 1, outputSize - inputSize - 1)), np.identity(inputSize + 1)), axis=1)
+		self.weightGradient = np.zeros((inputSize + 1, outputSize))
+		
+	def forward(self, input):
+		self.weight = np.concatenate((self.weight[:,0:self.outputSize - self.inputSize - 1], np.identity(self.inputSize + 1)), axis=1)
+		self.input = np.concatenate((input, np.ones((input.shape[0], 1))), axis=1)
+		self.output = np.dot(self.input, self.weight)
+		return self.output
+		
+	def backward(self, gradient):
+		self.weightGradient = np.dot(self.input.T, gradient)
+		return np.dot(gradient, self.weight.T)[:,:-1]
+
 class SoftmaxLayer:
 	def __init__(self):
 		self.type = "softmax"
@@ -190,8 +217,8 @@ class NN:
 
 class Data:
 	def __init__(self, training_input, training_teacher, holdout_input, holdout_teacher, test_input, test_teacher):
-		self.training_input = training_input
-		self.training_teacher = training_teacher
+		self.train_input = training_input
+		self.train_teacher = training_teacher
 		self.holdout_input = holdout_input
 		self.holdout_teacher = holdout_teacher
 		self.test_input = test_input
@@ -239,7 +266,7 @@ class NNTrainingWorkflow:
 		self.t = 0
 		while self.t < self.timeout and not self.earlyStop:
 			stepSize = self.annealingFunction.evaluate(self.t)
-			self.trainingMethod.train(self.nn, self.data.training_input, self.data.training_teacher, stepSize)
+			self.trainingMethod.train(self.nn, self.data.train_input, self.data.train_teacher, stepSize)
 			if self.callbackFunction is not None:
 				self.callbackFunction(self)
 			self.t += 1
@@ -250,7 +277,7 @@ def readData(label_fl, image_file, training):
 	self function is used to read in data from MNIST data set
 	'''
 	
-	val = 20000 if training else 2000
+	val = 60000 if training else 6000
 	label_file =  open(label_fl, 'rb')
 	tup = struct.unpack(">II", label_file.read(8))
 	labels = np.fromfile(label_file, dtype=np.int8)
@@ -261,13 +288,13 @@ def readData(label_fl, image_file, training):
 	
 	subset = np.zeros((val,tup[2]*tup[3]),dtype=np.float64)
 	if training:
-		for img in range(20000):
+		for img in range(val):
 			subset[img] = images[img].flatten()/float(127.5) - 1.0
-		return (labels[:20000],subset)
+		return (labels[:val],subset)
 	else:
-		for img in range(2000):
-			subset[img] = images[len(images) - 2000 + img].flatten()/float(127.5) - 1.0
-		return (labels[len(images) - 2000:],subset)
+		for img in range(val):
+			subset[img] = images[len(images) - val + img].flatten()/float(127.5) - 1.0
+		return (labels[len(images) - val:],subset)
 
 """
 Parameter:
@@ -294,16 +321,15 @@ def preprocessData(mode="2v3", holdoutFixed=False):
 		input = images[np.where(np.isin(labels, [2, second_label]))]
 		teacher = labels[np.where(np.isin(labels, [2, second_label]))]
 		teacher = np.reshape(teacher, (teacher.shape[0], 1))
-		#teacher = 3 - teacher if second_label == 3 else (8 - teacher) / 6
 		teacher = (teacher == 2).astype(int)
 
 		test_input = test_images[np.where(np.isin(test_labels, [2, second_label]))]
 		test_teacher = test_labels[np.where(np.isin(test_labels, [2, second_label]))]
 		test_teacher = np.reshape(test_teacher, (test_teacher.shape[0], 1))
-		#test_teacher = 3 - test_teacher if second_label == 3 else (8 - teacher) / 6
 		test_teacher = (test_teacher == 2).astype(int)
-		
-	n1 = int(np.round(input.shape[0]*0.9))
+	
+	# Holdout size
+	n1 = 10000
 	if holdoutFixed:
 		bits = np.loadtxt('test_holdout_set.txt', dtype=int)
 	else:
@@ -321,6 +347,42 @@ def preprocessData(mode="2v3", holdoutFixed=False):
 	
 	return ([train_input, train_teacher, holdout_input, holdout_teacher, test_input, test_teacher], bits)
 
+def callback3e(wf):
+	if not hasattr(wf, "trainLossArray"):
+		wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, wf.trainPercentCorrectArray, wf.holdoutPercentCorrectArray, wf.testPercentCorrectArray = [[],[],[],[],[],[]]
+		wf.cnt = 0
+		wf.lastLoss = 1e9
+		wf.minLoss = 1e9
+		
+	nn = wf.nn
+	loss = nn.loss(wf.data.holdout_input, wf.data.holdout_teacher)
+	wf.trainLossArray.append(nn.loss(wf.data.train_input, wf.data.train_teacher))
+	wf.holdoutLossArray.append(loss)
+	wf.testLossArray.append(nn.loss(wf.data.test_input, wf.data.test_teacher))
+		
+	wf.trainPercentCorrectArray.append(nn.predictionAccuracy(wf.data.train_input, wf.data.train_teacher))
+	wf.holdoutPercentCorrectArray.append(nn.predictionAccuracy(wf.data.holdout_input, wf.data.holdout_teacher))
+	wf.testPercentCorrectArray.append(nn.predictionAccuracy(wf.data.test_input, wf.data.test_teacher))
+		
+	if wf.t % 1 == 0:
+		print ("=======epoch ",wf.t , ", current loss is", loss,"=======")
+		print ("train   accuracy", wf.trainPercentCorrectArray[-1])
+		print ("holdout accuracy", wf.holdoutPercentCorrectArray[-1])
+		print ("test    accuracy", wf.testPercentCorrectArray[-1])
+
+	if (loss >= wf.lastLoss - 1e-10):
+		wf.cnt += 1
+	else:
+		wf.cnt = 0
+	if (loss < wf.minLoss):
+		wf.minLoss = loss
+		wf.minWeights = nn.getWeights()
+		wf.minT = wf.t
+	wf.lastLoss = loss
+
+	if wf.t > 10 and wf.cnt >= 3:
+		wf.earlyStop = True
+	
 """
 Return Values:
 0  int   epochs
@@ -628,13 +690,26 @@ def numericApprox(nn, layerNum, rowNum, colNum, graphID):
 	print(gradient, approx, abs(gradient-approx)/(epsilon**2))
 	nn.setWeights(oldWeight)
 
-numericApprox(nn, 0, 0, 0, 0)
-numericApprox(nn, 1, 0, 0, 0)
-numericApprox(nn, 0, 784, 0, 0)
-numericApprox(nn, 1, 64, 0, 0)
-# Train
-nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
-nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-
-#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(), callbackFunction=None)
+#numericApprox(nn, 0, 0, 0, 0)
+#numericApprox(nn, 1, 0, 0, 0)
+#numericApprox(nn, 0, 784, 0, 0)
+#numericApprox(nn, 1, 64, 0, 0)
+# Train Q3
+#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.001))
+#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+#
+#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=1, T=0.2), callbackFunction=callback3e)
 #workflow.train()
+
+
+#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
+#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+#
+#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
+#workflow.train()
+
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), ChaosLayer(inputSize=128, outputSize=256, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=256, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
+workflow.train()
