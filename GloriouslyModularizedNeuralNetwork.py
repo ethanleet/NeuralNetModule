@@ -53,23 +53,30 @@ class TanhLayer:
 	def backward(self, gradient):
 		return gradient * ((1.7159 * 2)/(3. * np.power(np.cosh(2/3. * self.input), 2)) + self.leakFactor)
 
-class ChaosLayer:
-	def __init__(self, inputSize, outputSize, weightInitialFactor = 1):
-		self.inputSize = inputSize
-		self.outputSize = outputSize
-		self.weight = np.concatenate((np.random.normal(loc=0, scale=weightInitialFactor / np.sqrt(inputSize + 1), size=(inputSize + 1, outputSize - inputSize - 1)), np.identity(inputSize + 1)), axis=1)
-		self.weightGradient = np.zeros((inputSize + 1, outputSize))
+class BranchLayer:
+	def setTarget(targetLayer):
+		self.targetLayer = targetLayer
+		targetLayer.sourceLayer = self
 		
 	def forward(self, input):
-		self.weight = np.concatenate((self.weight[:,0:self.outputSize - self.inputSize - 1], np.identity(self.inputSize + 1)), axis=1)
-		self.input = np.concatenate((input, np.ones((input.shape[0], 1))), axis=1)
-		self.output = np.dot(self.input, self.weight)
-		return self.output
+		targetLayer.secondInput = np.copy(input)
+		return input
 		
 	def backward(self, gradient):
-		self.weightGradient = np.dot(self.input.T, gradient)
-		return np.dot(gradient, self.weight.T)[:,:-1]
+		return self.secondGradient + gradient
 
+class ConcatenateLayer:
+	def setSource(sourceLayer):
+		self.sourceLayer = sourceLayer
+		sourceLayer.targetLayer = self
+		
+	def forward(self, input):
+		return np.concatenate((input, self.secondInput), axis=1)
+		
+	def backward(self, gradient):
+		self.sourceLayer.secondGradient = gradient[:,-self.secondInput.shape[1]:]
+		return gradient[:,:-self.secondInput.shape[1]]
+		
 class SoftmaxLayer:
 	def __init__(self):
 		self.type = "softmax"
