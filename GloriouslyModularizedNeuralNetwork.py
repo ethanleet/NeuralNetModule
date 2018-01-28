@@ -54,19 +54,19 @@ class TanhLayer:
 		return gradient * ((1.7159 * 2)/(3. * np.power(np.cosh(2/3. * self.input), 2)) + self.leakFactor)
 
 class BranchLayer:
-	def setTarget(targetLayer):
+	def setTarget(self, targetLayer):
 		self.targetLayer = targetLayer
 		targetLayer.sourceLayer = self
 		
 	def forward(self, input):
-		targetLayer.secondInput = np.copy(input)
+		self.targetLayer.secondInput = np.copy(input)
 		return input
 		
 	def backward(self, gradient):
 		return self.secondGradient + gradient
 
 class ConcatenateLayer:
-	def setSource(sourceLayer):
+	def setSource(self, sourceLayer):
 		self.sourceLayer = sourceLayer
 		sourceLayer.targetLayer = self
 		
@@ -85,6 +85,8 @@ class SoftmaxLayer:
 		return self.type == other.type
 		
 	def forward(self, input):
+		maxinput = np.reshape(np.amax(input, axis=1), (input.shape[0], 1))
+		input -= np.repeat(maxinput, input.shape[1], axis=1)
 		temp = np.exp(input)
 		tempsum = np.sum(temp, axis=1)
 		tempsum = np.reshape(tempsum, (input.shape[0], 1))
@@ -209,7 +211,7 @@ class NN:
 		return self.predictor.predict(self.test(input))
 	
 	def predictionAccuracy(self, input, teacher):
-		return np.sum(np.sum(np.abs(teacher != self.predict(input)), axis=1) == 0) / input.shape[0]
+		return np.sum(np.sum(np.abs(teacher != self.predict(input)), axis=1) == 0) / float(input.shape[0])
 	
 	def train(self, input, teacher, stepSize):
 		output = self.test(input)
@@ -554,35 +556,35 @@ def plotLoss(trainingStats, mode="2v3"):
 	plt.clf()
 
 def plotAccuracyVsLambda(accuracyAcrossLambda, log_lambda, regularization_mode):
-	plot_title = "Q5. Percent accuracy vs. different λ with " + regularization_mode + " regularization"
+	plot_title = "Q5. Percent accuracy vs. different lambda with " + regularization_mode + " regularization"
 	file_name = "Q5AccuracyOverLambda" + regularization_mode + timestamp + ".png"
 	accuracyAcrossLambda = list(np.asarray(accuracyAcrossLambda).T)
 	plt.plot(log_lambda, accuracyAcrossLambda[0], label="train")
 	plt.title(plot_title)
-	plt.xlabel("log(λ)")
+	plt.xlabel("log(lambda)")
 	plt.ylabel("accuracy")
 	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 
 def plotLossVsLambda(lossAcrossLambda, log_lambda, regularization_mode):
-	plot_title = "Q5. Test error vs. different λ with " + regularization_mode + " regularization"
+	plot_title = "Q5. Test error vs. different lambda with " + regularization_mode + " regularization"
 	file_name = "Q5LossOverLambda" + regularization_mode + timestamp + ".png"
 	lossAcrossLambda = list(np.asarray(lossAcrossLambda).T)
 	plt.plot(log_lambda, lossAcrossLambda[2], label="test")
 	plt.title(plot_title)
-	plt.xlabel("log(λ)")
+	plt.xlabel("log(lambda)")
 	plt.ylabel("test error")
 	plt.legend()
 	plt.savefig(file_name)
 	plt.clf()
 	
 def plotWeightLengthsVsLambda(weightLengths, log_lambda, regularization_mode):
-	plot_title = "Q5. Weight lengths vs. different λ with " + regularization_mode + " regularization"
+	plot_title = "Q5. Weight lengths vs. different lambda with " + regularization_mode + " regularization"
 	file_name = "Q5WeightLengthsOverLambda" + regularization_mode + timestamp + ".png"
 	plt.plot(log_lambda, weightLengths)
 	plt.title(plot_title)
-	plt.xlabel("log(λ)")
+	plt.xlabel("log(lambda)")
 	plt.ylabel("weight lengths")
 	plt.savefig(file_name)
 	plt.clf()
@@ -723,14 +725,33 @@ def numericApprox(nn, layerNum, rowNum, colNum, graphID):
 #workflow.train()
 
 
+#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
+#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.05, T=0.5), callbackFunction=callback3e)
+#workflow.train()
+
+branchLayer1 = BranchLayer()
+fcLayer1 = FullyConnectedLayer(inputSize=784, outputSize=64, weightInitialFactor=1)
+tanhLayer1 = TanhLayer()
+concatenateLayer1 = ConcatenateLayer()
+branchLayer1.setTarget(concatenateLayer1)
+branchLayer2 = BranchLayer()
+fcLayer2 = FullyConnectedLayer(inputSize=784+64, outputSize=32, weightInitialFactor=1)
+tanhLayer2 = TanhLayer()
+concatenateLayer2 = ConcatenateLayer()
+branchLayer2.setTarget(concatenateLayer2)
+branchLayer3 = BranchLayer()
+fcLayer3 = FullyConnectedLayer(inputSize=784+64+32, outputSize=32, weightInitialFactor=1)
+tanhLayer3 = TanhLayer()
+concatenateLayer3 = ConcatenateLayer()
+branchLayer3.setTarget(concatenateLayer3)
+fcLayer4 = FullyConnectedLayer(inputSize=784+64+32+32, outputSize=10, weightInitialFactor=1)
+softmaxLayer = SoftmaxLayer()
+
+
 nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
-nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+nn.addLinearLayers([branchLayer1, fcLayer1, tanhLayer1, concatenateLayer1, branchLayer2, fcLayer2, tanhLayer2, concatenateLayer2, branchLayer3, fcLayer3, tanhLayer3, concatenateLayer3, fcLayer4, softmaxLayer])
 
 workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.05, T=0.5), callbackFunction=callback3e)
 workflow.train()
-
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), ChaosLayer(inputSize=128, outputSize=256, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=256, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
-#workflow.train()
