@@ -76,7 +76,7 @@ class ConcatenateLayer:
 	def backward(self, gradient):
 		self.sourceLayer.secondGradient = gradient[:,-self.secondInput.shape[1]:]
 		return gradient[:,:-self.secondInput.shape[1]]
-		
+
 class SoftmaxLayer:
 	def __init__(self):
 		self.type = "softmax"
@@ -140,11 +140,25 @@ class MomentumTrainer:
 	def train(self, layer, regularizer, stepSize):
 		if hasattr(layer, 'weight'):
 			if hasattr(layer, 'momentum'):
-				layer.momentum = layer.momentum * self.momentumFactor + regularizer.regularize(layer) * stepSize * (1 - self.momentumFactor)
+				layer.momentum = layer.momentum * self.momentumFactor + regularizer.regularize(layer) * stepSize
 			else:
-				layer.momentum = regularizer.regularize(layer) * stepSize * (1 - self.momentumFactor)
+				layer.momentum = regularizer.regularize(layer) * stepSize
 			layer.weight -= layer.momentum
 
+class NesterovTrainer:
+	def __init__(self, momentumFactor = 0.9):
+		self.momentumFactor = momentumFactor
+	
+	def train(self, layer, regularizer, stepSize):
+		if hasattr(layer, 'weight'):
+			if hasattr(layer, 'momentum'):
+				momentum_prev = np.copy(layer.momentum)
+				layer.momentum = layer.momentum * self.momentumFactor - regularizer.regularize(layer) * stepSize
+				layer.weight += -momentum_prev * self.momentumFactor + layer.momentum * (1 + self.momentumFactor)
+			else:
+				layer.momentum = -regularizer.regularize(layer) * stepSize
+				layer.weight += layer.momentum
+			
 class NoRegularizer:
 	def regularize(self, layer):
 		return layer.weightGradient
@@ -709,14 +723,14 @@ def numericApprox(nn, layerNum, rowNum, colNum, graphID):
 #workflow.train()
 
 
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.05, T=0.5), callbackFunction=callback3e)
+workflow.train()
+
 #nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), ChaosLayer(inputSize=128, outputSize=256, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=256, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
 #
 #workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
 #workflow.train()
-
-nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.01))
-nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), ChaosLayer(inputSize=128, outputSize=256, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=256, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-
-workflow = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
-workflow.train()
