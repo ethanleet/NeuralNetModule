@@ -305,6 +305,13 @@ class NNTrainingWorkflow:
 			if self.callbackFunction is not None:
 				self.callbackFunction(self)
 			self.t += 1
+		print ("=======best results=======")
+		print ("train   accuracy", wf.trainAccuracyArray[wf.minT])
+		print ("holdout accuracy", wf.holdoutAccuracyArray[wf.minT])
+		print ("test    accuracy", wf.testAccuracyArray[wf.minT])
+		print ("train   loss    ", wf.trainLossArray[wf.minT])
+		print ("holdout loss    ", wf.holdoutLossArray[wf.minT])
+		print ("test    loss    ", wf.testLossArray[wf.minT])
 
 def readData(label_fl, image_file, training):
 	
@@ -335,7 +342,7 @@ def readData(label_fl, image_file, training):
 Parameter:
 mode should be "2v3", "2v8", "all"
 """
-def preprocessData(mode="2v3", holdoutFixed=False):
+def preprocessData(mode="all", holdoutFixed=False):
 	labels, images = readData("train-labels.idx1-ubyte", "train-images.idx3-ubyte", True)
 	test_labels, test_images = readData("t10k-labels.idx1-ubyte", "t10k-images.idx3-ubyte", False)
 	
@@ -422,7 +429,7 @@ def callback3e(wf):
 	wf.trainAccuracyArray.append(nn.predictionAccuracy(wf.data.train_input, wf.data.train_teacher))
 	wf.holdoutAccuracyArray.append(nn.predictionAccuracy(wf.data.holdout_input, wf.data.holdout_teacher))
 	wf.testAccuracyArray.append(nn.predictionAccuracy(wf.data.test_input, wf.data.test_teacher))
-		
+	
 	if wf.t % 1 == 0:
 		print ("=======epoch ",wf.t , ", current loss is", loss,"=======")
 		print ("train   accuracy", wf.trainAccuracyArray[-1])
@@ -540,90 +547,90 @@ numericApprox(nn, 0, 784, 0, 3)
 numericApprox(nn, 1, 64, 0, 3)
 
 """Train Q3"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=np.sqrt(785)*0.01), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=np.sqrt(64)*0.01), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.5, T=0.2), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Q3")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Q3")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=np.sqrt(785)*0.01), SigmoidLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=np.sqrt(64)*0.01), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.3, T=0.2), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Q3")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Q3")
 
 """Train tanh"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=np.sqrt(785)*0.01), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=np.sqrt(64)*0.01), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.1, T=0.2), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "tanh")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "tanh")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=np.sqrt(785)*0.01), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=np.sqrt(64)*0.01), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.07, T=0.2), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "tanh")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "tanh")
 
 """Train weight initialization"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.1, T=0.1), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Init")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Init")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NaiveTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.07, T=0.1), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Init")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Init")
 
 """Train momentum"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.5), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Momentum")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Momentum")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.1), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Momentum")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Momentum")
 
 """Train 128 hidden units"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=128, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.5), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "128HU")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "128HU")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=128, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=128, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.1), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "128HU")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "128HU")
 
 """Train 32 hidden units"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=32, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=32, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.5), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "32HU")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "32HU")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=32, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=32, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.01, T=0.1), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "32HU")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "32HU")
 
 """Train 2 hidden layers"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=60, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=60, outputSize=60, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=60, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.005, T=0.8), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "2HL")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "2HL")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=MomentumTrainer(momentumFactor=0.9), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=60, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=60, outputSize=60, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=60, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.005, T=0.5), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "2HL")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "2HL")
 
 """Train Nesterov momentum"""
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.02, T=0.5), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Nesterov")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Nesterov")
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=NoRegularizer())
+nn.addLinearLayers([FullyConnectedLayer(inputSize=784, outputSize=nHiddenUnits, weightInitialFactor=1), TanhLayer(), FullyConnectedLayer(inputSize=nHiddenUnits, outputSize=10, weightInitialFactor=1), SoftmaxLayer()])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.018, T=0.08), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Nesterov")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Nesterov")
 
 """Train weird architecture"""
-#branchLayer1 = BranchLayer()
-#fcLayer1 = FullyConnectedLayer(inputSize=784, outputSize=64, weightInitialFactor=1)
-#tanhLayer1 = TanhLayer()
-#concatenateLayer1 = ConcatenateLayer()
-#branchLayer1.setTarget(concatenateLayer1)
-#fcLayer2 = FullyConnectedLayer(inputSize=784+64, outputSize=10, weightInitialFactor=1)
-#softmaxLayer = SoftmaxLayer()
-#
-#nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
-#nn.addLinearLayers([branchLayer1, fcLayer1, tanhLayer1, concatenateLayer1, fcLayer2, softmaxLayer])
-#
-#wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.02, T=0.5), callbackFunction=callback3e)
-#wf.train()
-#plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Weird")
-#plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Weird")
+branchLayer1 = BranchLayer()
+fcLayer1 = FullyConnectedLayer(inputSize=784, outputSize=64, weightInitialFactor=1)
+tanhLayer1 = TanhLayer()
+concatenateLayer1 = ConcatenateLayer()
+branchLayer1.setTarget(concatenateLayer1)
+fcLayer2 = FullyConnectedLayer(inputSize=784+64, outputSize=10, weightInitialFactor=1)
+softmaxLayer = SoftmaxLayer()
+
+nn = NN(lossfunction=MultiwayCrossEntropyLossFunction(), trainer=NesterovTrainer(), predictor=MaxPredictor(), regularizer=L1Regularizer(modifier=0.002))
+nn.addLinearLayers([branchLayer1, fcLayer1, tanhLayer1, concatenateLayer1, fcLayer2, softmaxLayer])
+
+wf = NNTrainingWorkflow(nn, data=data, timeout=1e3, trainingMethod=MiniBatchTrainingMethod(), annealingFunction=PowerAnnealingFunction(initialStepSize=0.02, T=0.4), callbackFunction=callback3e)
+wf.train()
+plotLoss(wf.t, wf.trainLossArray, wf.holdoutLossArray, wf.testLossArray, "Weird")
+plotAccuracy(wf.t, wf.trainAccuracyArray, wf.holdoutAccuracyArray, wf.testAccuracyArray, "Weird")
